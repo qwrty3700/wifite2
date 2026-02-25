@@ -11,7 +11,6 @@ from .util.color import Color
 
 import os
 import subprocess
-import sys
 
 
 def _is_termux() -> bool:
@@ -21,16 +20,6 @@ def _is_termux() -> bool:
     if prefix.startswith("/data/data/com.termux/"):
         return True
     return os.path.exists("/data/data/com.termux/files/usr/bin/termux-usb")
-
-if _is_termux():
-    try:
-        sys.stdout.reconfigure(line_buffering=True)
-    except Exception:
-        pass
-    try:
-        sys.stderr.reconfigure(line_buffering=True)
-    except Exception:
-        pass
 
 
 class Wifite(object):
