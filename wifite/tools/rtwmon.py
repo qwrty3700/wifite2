@@ -197,6 +197,7 @@ class RtwmonAirodump(Dependency):
                 '--bus', info['bus'],
                 '--address', info['address'],
                 'scan',
+                '--forever',
             ]
             
             if self.channel:
