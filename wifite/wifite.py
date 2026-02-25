@@ -13,6 +13,15 @@ import os
 import subprocess
 
 
+def _is_termux() -> bool:
+    if os.environ.get("TERMUX_VERSION") or os.environ.get("TERMUX_APP_PID"):
+        return True
+    prefix = str(os.environ.get("PREFIX", "") or "")
+    if prefix.startswith("/data/data/com.termux/"):
+        return True
+    return os.path.exists("/data/data/com.termux/files/usr/bin/termux-usb")
+
+
 class Wifite(object):
 
     def __init__(self):
@@ -41,7 +50,7 @@ class Wifite(object):
         if os.name == 'nt':
             Color.pl('{!} {R}error: {O}wifite{R} must be run under a {O}*NIX{W}{R} like OS')
             Configuration.exit_gracefully()
-        if os.getuid() != 0:
+        if hasattr(os, "getuid") and os.getuid() != 0 and not _is_termux():
             Color.pl('{!} {R}error: {O}wifite{R} must be run as {O}root{W}')
             Color.pl('{!} {R}re-run with {O}sudo{W}')
             Configuration.exit_gracefully()
