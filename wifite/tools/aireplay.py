@@ -61,6 +61,14 @@ class Aireplay(Thread, Dependency):
     dependency_name = 'aireplay-ng'
     dependency_url = 'https://www.aircrack-ng.org/install.html'
 
+    def __new__(cls, target, attack_type, client_mac=None, replay_file=None):
+        from ..config import Configuration
+        interface = Configuration.interface
+        if interface and interface.startswith('rtwmon-'):
+            from .rtwmon import RtwmonAireplay
+            return RtwmonAireplay(target, attack_type, client_mac, replay_file)
+        return super(Aireplay, cls).__new__(cls)
+
     def __init__(self, target, attack_type, client_mac=None, replay_file=None):
         """
             Starts aireplay process.
@@ -386,6 +394,10 @@ class Aireplay(Thread, Dependency):
         num_deauths = num_deauths or Configuration.num_deauths
         interface = interface or Configuration.interface
         
+        if interface and interface.startswith('rtwmon-'):
+            from .rtwmon import RtwmonAireplay
+            return RtwmonAireplay.deauth(target_bssid, essid, client_mac, num_deauths, timeout, interface)
+
         deauth_cmd = [
             'aireplay-ng',
             '-0',  # Deauthentication

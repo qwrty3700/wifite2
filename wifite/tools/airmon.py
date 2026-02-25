@@ -10,6 +10,7 @@ import time
 from .dependency import Dependency
 from .ip import Ip
 from .iw import Iw
+from .rtwmon import Rtwmon, RtwmonIface
 from ..config import Configuration
 from ..util.color import Color
 from ..util.process import Process
@@ -109,6 +110,11 @@ class Airmon(Dependency):
                 continue
 
             interfaces.append(AirmonIface(phy, interface, driver, chipset))
+        
+        # Add rtwmon interfaces
+        for iface in Rtwmon.get_interfaces():
+             # Convert RtwmonIface to AirmonIface compatible object
+             interfaces.append(AirmonIface(iface.phy, iface.interface, iface.driver, iface.chipset))
 
         return interfaces
 
@@ -207,15 +213,21 @@ class Airmon(Dependency):
                 Exception: If no interface is found
         """
         # Get interface name from input
-        if type(interface) == AirmonIface:
+        if hasattr(interface, 'interface'):
             iface_name = interface.interface
-            driver = interface.driver
+            driver = getattr(interface, 'driver', None)
         else:
-            iface_name = interface
+            iface_name = str(interface)
             driver = None # We'll try to fetch this if needed
 
         # Remember this as the 'base' interface.
         Airmon.base_interface = iface_name
+
+        # Check for rtwmon interface
+        if iface_name.startswith('rtwmon-'):
+            # It's already ready for use, just return it
+            Color.pl('{+} {G}rtwmon interface detected, skipping monitor mode setup{W}')
+            return iface_name
 
         # Try ICNSS2-specific activation first
         if iface_name == 'wlan0':
@@ -331,6 +343,18 @@ class Airmon(Dependency):
 
     @classmethod
     def stop(cls, interface):
+        """
+            Stops an interface (iface) from monitor mode
+            Args:
+                interface: Interface to stop
+            Returns:
+                None
+        """
+        # Check for rtwmon interface
+        if interface.startswith('rtwmon-'):
+            # Nothing to stop for rtwmon interfaces
+            return None, None
+
         Color.p('{!}{W} Disabling {O}monitor{W} mode on {R}%s{W}...\n' % interface)
 
         if cls.use_ipiw:

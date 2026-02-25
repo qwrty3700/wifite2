@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from ..tools.iw import Iw
 from ..tools.ip import Ip
 from ..tools.airmon import Airmon
+from ..tools.rtwmon import Rtwmon
 from ..util.process import Process
 from ..util.color import Color
 from ..util.logger import log_info, log_error, log_warning, log_debug
@@ -62,6 +63,18 @@ class InterfaceCapabilities:
     
     def _detect_capabilities(self):
         """Detect interface capabilities using iw."""
+        if self.interface.startswith('rtwmon-'):
+            # rtwmon interfaces support everything by definition (monitor, injection)
+            self.supports_ap_mode = False # Maybe true if implemented, but safer false for now
+            self.supports_monitor_mode = True
+            self.supports_managed_mode = False
+            self.supports_injection = True
+            self.driver = "rtwmon"
+            self.chipset = "Realtek Userspace"
+            # Parse bus/addr for uniqueness if needed, but for now just mock it
+            self.mac_address = "00:00:00:00:00:00" # Placeholder, maybe get from rtwmon info
+            return
+
         try:
             # Get PHY info
             output = Process(['iw', 'dev', self.interface, 'info']).stdout()
@@ -1679,6 +1692,12 @@ class InterfaceManager:
             try:
                 log_debug('InterfaceManager', 'Enumerating wireless interfaces using iw...')
                 interface_names = Iw.get_interfaces()
+                
+                # Add rtwmon interfaces
+                for iface in Rtwmon.get_interfaces():
+                    if iface.interface not in interface_names:
+                        interface_names.append(iface.interface)
+
                 log_debug('InterfaceManager', f'iw returned {len(interface_names) if interface_names else 0} interface(s)')
             except Exception as e:
                 log_error('InterfaceManager', f'Failed to enumerate interfaces: {e}', e)
@@ -1773,6 +1792,25 @@ class InterfaceManager:
         Returns:
             InterfaceInfo object or None if interface is invalid
         """
+        if interface.startswith('rtwmon-'):
+            # Return mocked info for rtwmon interfaces
+            return InterfaceInfo(
+                name=interface,
+                driver='rtwmon',
+                chipset='Realtek Userspace',
+                phy='usb',
+                mac_address='00:00:00:00:00:00',
+                supports_monitor_mode=True,
+                supports_injection=True,
+                supports_ap_mode=False,
+                current_mode='monitor',
+                is_up=True,
+                is_connected=False,
+                frequency=2412,
+                channel=1,
+                tx_power=20
+            )
+
         try:
             log_debug('InterfaceManager', f'Gathering information for {interface}')
             

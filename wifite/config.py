@@ -321,6 +321,30 @@ class Configuration(object):
             cls.get_monitor_mode_interface()
 
     @classmethod
+    def _apply_rtwmon_profile(cls):
+        cls.wep_filter = False
+        cls.owe_filter = False
+        cls.wpa3_filter = False
+        cls.wpa3_only = False
+        cls.wpa_filter = True
+
+        cls.no_wps = True
+        cls.wps_filter = False
+        cls.wps_only = False
+        cls.wps_pixie = False
+        cls.wps_pin = False
+        cls.wps_no_nullpin = True
+
+        cls.dont_use_pmkid = True
+        cls.use_pmkid_only = False
+        cls.pmkid_passive = False
+
+        cls.parse_encryption()
+        cls.validate()
+
+        Color.pl('{+} {C}rtwmon:{W} WPA2-only, WPS off, PMKID off')
+
+    @classmethod
     def get_monitor_mode_interface(cls):
         if cls.interface is None:
             # Interface wasn't defined, select it!
@@ -328,6 +352,8 @@ class Configuration(object):
             cls.interface = Airmon.ask()
             if cls.random_mac:
                 Macchanger.random()
+        if cls.interface and str(cls.interface).startswith('rtwmon-'):
+            cls._apply_rtwmon_profile()
 
     @classmethod
     def load_from_arguments(cls):

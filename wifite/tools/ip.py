@@ -14,6 +14,9 @@ class Ip(Dependency):
     @classmethod
     def up(cls, interface):
         """Put interface up"""
+        if str(interface).startswith('rtwmon-'):
+            return
+
         from ..util.process import Process
 
         (out, err) = Process.call(f'ip link set {interface} up')
@@ -23,6 +26,9 @@ class Ip(Dependency):
     @classmethod
     def down(cls, interface):
         """Put interface down"""
+        if str(interface).startswith('rtwmon-'):
+            return
+
         from ..util.process import Process
 
         (out, err) = Process.call(f'ip link set {interface} down')
@@ -31,6 +37,9 @@ class Ip(Dependency):
 
     @classmethod
     def get_mac(cls, interface):
+        if str(interface).startswith('rtwmon-'):
+            return "00:00:00:00:00:00"
+
         from ..util.process import Process
 
         (out, err) = Process.call(f'ip link show {interface}')

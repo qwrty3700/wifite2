@@ -20,6 +20,17 @@ class Airodump(Dependency):
     dependency_name = 'airodump-ng'
     dependency_url = 'https://www.aircrack-ng.org/install.html'
 
+    def __new__(cls, interface=None, *args, **kwargs):
+        from ..config import Configuration
+        if interface is None:
+            interface = Configuration.interface
+        
+        if interface and interface.startswith('rtwmon-'):
+            from .rtwmon import RtwmonAirodump
+            return RtwmonAirodump(interface, *args, **kwargs)
+        
+        return super(Airodump, cls).__new__(cls)
+
     def __init__(self, interface=None, channel=None, encryption=None,
                  wps=WPSState.UNKNOWN, target_bssid=None,
                  output_file_prefix='airodump',
@@ -332,6 +343,9 @@ class Airodump(Dependency):
                 continue
             if Configuration.clients_only and len(target_obj.clients) == 0:
                 continue
+            if Configuration.interface and str(Configuration.interface).startswith('rtwmon-'):
+                if getattr(target_obj, 'primary_encryption', None) != 'WPA2':
+                    continue
 
             # Encryption type filtering
             # The target_obj.encryption holds the *primary* encryption type like "WPA3", "WPA", "WEP", "OWE"

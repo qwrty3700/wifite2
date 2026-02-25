@@ -1,0 +1,3 @@
+[submodule "rtwmon"]
+	path = rtwmon
+	url = git@github.com:ahdiotllfer/rtwmon.git

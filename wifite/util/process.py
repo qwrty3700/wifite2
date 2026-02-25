@@ -8,6 +8,7 @@ import os
 import atexit
 import threading
 import subprocess
+import shutil
 from subprocess import Popen, PIPE
 from ..util.color import Color
 from ..config import Configuration
@@ -131,11 +132,7 @@ class Process(object):
         if Configuration.initialized and program in set(Configuration.existing_commands.keys()):
             return Configuration.existing_commands[program]
 
-        p2 = Process(['which', program])
-        stdout = p2.stdout().strip()
-        stderr = p2.stderr().strip()
-
-        exist = not stdout == stderr == ''
+        exist = shutil.which(program) is not None
         if Configuration.initialized:
             Configuration.existing_commands.update({program: exist})
         return exist
@@ -476,4 +473,3 @@ if __name__ == '__main__':
     print('Running yes...')
     time.sleep(1)
     print('yes should stop now')
-
