@@ -7,6 +7,8 @@ import re
 import time
 import subprocess
 import fcntl
+import socket
+import atexit
 from typing import List, Optional
 
 from .dependency import Dependency
@@ -18,6 +20,52 @@ from ..model.target import Target
 from ..model.client import Client
 
 _RTWMON_RX_CONTROL_SOCKS = {}
+_RTWMON_IFACE_DRIVERS = {}
+_RTWMON_TERMUX_DAEMON_RESET_DONE = False
+
+
+def _termux_daemon_sock() -> str:
+    return "/data/data/com.termux/files/usr/tmp/rtwmon-usb.sock"
+
+
+def _termux_daemon_close(sock_path: str) -> None:
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.settimeout(0.2)
+            s.connect(str(sock_path))
+            s.sendall(b'{"method":"close"}\n')
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _termux_daemon_reset_once() -> None:
+    global _RTWMON_TERMUX_DAEMON_RESET_DONE
+    if _RTWMON_TERMUX_DAEMON_RESET_DONE:
+        return
+    _RTWMON_TERMUX_DAEMON_RESET_DONE = True
+    sock_path = _termux_daemon_sock()
+    _termux_daemon_close(sock_path)
+    try:
+        if os.path.exists(sock_path):
+            os.unlink(sock_path)
+    except Exception:
+        pass
+
+
+def _termux_daemon_close_atexit() -> None:
+    try:
+        _termux_daemon_close(_termux_daemon_sock())
+    except Exception:
+        pass
+
+
+atexit.register(_termux_daemon_close_atexit)
 _RTWMON_IFACE_DRIVERS = {}
 
 class RtwmonIface:
@@ -77,6 +125,8 @@ class Rtwmon(Dependency):
             return []
 
         try:
+            if Rtwmon._is_termux():
+                _termux_daemon_reset_once()
             # Call rtwmon.py list
             # We need to run it with python3
             cmd = ['python3', Rtwmon.RTWMON_PATH, 'list']
