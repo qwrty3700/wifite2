@@ -22,6 +22,18 @@ class AttackWPA(Attack):
     def __init__(self, target):
         super(AttackWPA, self).__init__(target)
         self.clients = []
+        try:
+            for c in (getattr(target, "clients", None) or []):
+                sta = getattr(c, "station", None) or getattr(c, "client", None) or getattr(c, "mac", None)
+                if not sta:
+                    continue
+                sta = str(sta).strip()
+                if not sta:
+                    continue
+                if sta not in self.clients:
+                    self.clients.append(sta)
+        except Exception:
+            pass
         self.crack_result = None
         self.success = False
         
