@@ -194,36 +194,17 @@ class RtwmonAirodump(Dependency):
             device_path = Rtwmon._termux_device_path(info.get("bus"), info.get("address"))
 
         if self.target_bssid:
-            # Attack mode: use deauth-burst
             pcap_file = Configuration.temp(f"{self.output_file_prefix}.cap")
             # Clean old pcap
             if os.path.exists(pcap_file):
                 try: os.remove(pcap_file)
                 except: pass
-
-            try:
-                burst_interval_ms = int(float(getattr(Configuration, 'wpa_deauth_timeout', 2) or 2) * 1000)
-            except Exception:
-                burst_interval_ms = 2000
-            if burst_interval_ms < 200:
-                burst_interval_ms = 200
-
-            try:
-                burst_size = int(getattr(Configuration, 'num_deauths', 10) or 10)
-            except Exception:
-                burst_size = 10
-            if burst_size < 1:
-                burst_size = 1
             
             backend_cmd = [
                 'python3', '-u', Rtwmon.RTWMON_PATH,
-                'deauth-burst',
-                '--channel', str(self.channel or 1),
-                '--bssid', self.target_bssid,
-                '--target-mac', 'ff:ff:ff:ff:ff:ff',
+                'scan',
+                '--channels', str(self.channel or 1),
                 '--pcap', pcap_file,
-                '--burst-size', str(burst_size),
-                '--burst-interval-ms', str(burst_interval_ms),
             ]
         else:
             # Scan mode
