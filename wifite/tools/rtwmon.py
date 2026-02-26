@@ -18,6 +18,7 @@ from ..model.target import Target
 from ..model.client import Client
 
 _RTWMON_RX_CONTROL_SOCKS = {}
+_RTWMON_IFACE_DRIVERS = {}
 
 class RtwmonIface:
     def __init__(self, driver, vid, pid, bus, addr):
@@ -93,7 +94,12 @@ class Rtwmon(Dependency):
                     pid = parts[2]
                     bus = parts[3]
                     addr = parts[4]
-                    interfaces.append(RtwmonIface(driver, vid, pid, bus, addr))
+                    iface = RtwmonIface(driver, vid, pid, bus, addr)
+                    interfaces.append(iface)
+                    try:
+                        _RTWMON_IFACE_DRIVERS[str(iface.interface)] = str(driver)
+                    except Exception:
+                        pass
         except Exception as e:
             Color.pl(f"{{R}}Error detecting rtwmon devices: {e}{{W}}")
         
@@ -211,6 +217,8 @@ class RtwmonAirodump(Dependency):
 
         bus_s = str(info.get("bus"))
         addr_s = str(info.get("address"))
+        driver_s = str(_RTWMON_IFACE_DRIVERS.get(str(self.interface), "auto"))
+        daemon_sock = "/data/data/com.termux/files/usr/tmp/rtwmon-usb.sock" if Rtwmon._is_termux() else ""
 
         if self.target_bssid:
             # Attack mode: use rx + control socket (deauth via rtwmon ctl)
@@ -230,8 +238,10 @@ class RtwmonAirodump(Dependency):
             
             backend_cmd = [
                 'python3', '-u', Rtwmon.RTWMON_PATH,
+                '--driver', driver_s,
                 '--bus', bus_s,
                 '--address', addr_s,
+                '--termux-daemon-sock', str(daemon_sock),
                 'rx',
                 '--channel', str(self.channel or 1),
                 '--pcap', pcap_file,
@@ -246,8 +256,10 @@ class RtwmonAirodump(Dependency):
             # Scan mode
             backend_cmd = [
                 'python3', '-u', Rtwmon.RTWMON_PATH,
+                '--driver', driver_s,
                 '--bus', bus_s,
                 '--address', addr_s,
+                '--termux-daemon-sock', str(daemon_sock),
                 'scan',
             ]
             
