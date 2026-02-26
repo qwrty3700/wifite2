@@ -22,10 +22,58 @@ from ..model.client import Client
 _RTWMON_RX_CONTROL_SOCKS = {}
 _RTWMON_IFACE_DRIVERS = {}
 _RTWMON_TERMUX_DAEMON_RESET_DONE = False
+_RTWMON_DAEMON_SOCKS = {}
 
 
 def _termux_daemon_sock() -> str:
     return "/data/data/com.termux/files/usr/tmp/rtwmon-usb.sock"
+
+
+def _termux_daemon_sock_for(bus: str, addr: str) -> str:
+    b = str(bus).strip()
+    a = str(addr).strip()
+    if not b or not a:
+        return _termux_daemon_sock()
+    return f"/data/data/com.termux/files/usr/tmp/rtwmon-usb-{b}-{a}.sock"
+
+
+def _termux_daemon_prepare(sock_path: str) -> None:
+    _termux_daemon_close(sock_path)
+    try:
+        if os.path.exists(sock_path):
+            os.unlink(sock_path)
+    except Exception:
+        pass
+
+
+def _termux_daemon_ensure_for(*, driver: str, bus: str, addr: str, sock_path: str) -> None:
+    if not Rtwmon._is_termux():
+        return
+    if _termux_daemon_ping(sock_path):
+        return
+    _termux_daemon_prepare(sock_path)
+    cmd = [
+        "python3",
+        "-u",
+        Rtwmon.RTWMON_PATH,
+        "--driver",
+        str(driver),
+        "--bus",
+        str(bus),
+        "--address",
+        str(addr),
+        "termux-daemon",
+        "--sock",
+        str(sock_path),
+    ]
+    proc = Process(cmd, devnull=True)
+    t0 = time.monotonic()
+    while proc.poll() is None and (time.monotonic() - t0) < 2.0:
+        time.sleep(0.05)
+    try:
+        proc.interrupt()
+    except Exception:
+        pass
 
 
 def _termux_daemon_close(sock_path: str) -> None:
@@ -44,6 +92,24 @@ def _termux_daemon_close(sock_path: str) -> None:
         pass
 
 
+def _termux_daemon_ping(sock_path: str) -> bool:
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.settimeout(0.2)
+            s.connect(str(sock_path))
+            s.sendall(b'{"method":"ping"}\n')
+            _ = s.recv(256)
+            return True
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
+    except Exception:
+        return False
+
+
 def _termux_daemon_reset_once() -> None:
     global _RTWMON_TERMUX_DAEMON_RESET_DONE
     if _RTWMON_TERMUX_DAEMON_RESET_DONE:
@@ -60,7 +126,8 @@ def _termux_daemon_reset_once() -> None:
 
 def _termux_daemon_close_atexit() -> None:
     try:
-        _termux_daemon_close(_termux_daemon_sock())
+        for sock_path in set(list(_RTWMON_DAEMON_SOCKS.values()) + [_termux_daemon_sock()]):
+            _termux_daemon_close(sock_path)
     except Exception:
         pass
 
@@ -268,7 +335,13 @@ class RtwmonAirodump(Dependency):
         bus_s = str(info.get("bus"))
         addr_s = str(info.get("address"))
         driver_s = str(_RTWMON_IFACE_DRIVERS.get(str(self.interface), "auto"))
-        daemon_sock = "/data/data/com.termux/files/usr/tmp/rtwmon-usb.sock" if Rtwmon._is_termux() else ""
+        daemon_sock = _termux_daemon_sock_for(bus_s, addr_s) if Rtwmon._is_termux() else ""
+        if daemon_sock:
+            try:
+                _RTWMON_DAEMON_SOCKS[(bus_s, addr_s)] = daemon_sock
+            except Exception:
+                pass
+            _termux_daemon_ensure_for(driver=driver_s, bus=bus_s, addr=addr_s, sock_path=daemon_sock)
 
         if self.target_bssid:
             # Attack mode: use rx + control socket (deauth via rtwmon ctl)
@@ -696,11 +769,7 @@ class RtwmonAireplay(Dependency):
                 '--count', str(num_deauths),
                 '--delay-ms', '50',
             ]
-            proc = Process(cmd, devnull=True)
-            while proc.poll() is None:
-                if proc.running_time() >= timeout:
-                    proc.interrupt()
-                    break
+            Process(cmd, devnull=True)
             return
 
         cmd = [
@@ -715,12 +784,12 @@ class RtwmonAireplay(Dependency):
             '--delay-ms', '50',
         ]
         if Rtwmon._is_termux():
-            daemon_sock = str(os.environ.get("RTWMON_TERMUX_DAEMON_SOCK", "") or "").strip()
+            daemon_sock = None
+            try:
+                daemon_sock = _RTWMON_DAEMON_SOCKS.get((str(info['bus']), str(info['address'])))
+            except Exception:
+                daemon_sock = None
             if not daemon_sock:
                 daemon_sock = "/data/data/com.termux/files/usr/tmp/rtwmon-usb.sock"
             cmd = ['python3', '-u', Rtwmon.RTWMON_PATH, '--termux-daemon-sock', daemon_sock, *cmd[3:]]
-        proc = Process(cmd, devnull=True)
-        while proc.poll() is None:
-            if proc.running_time() >= timeout:
-                proc.interrupt()
-                break
+        Process(cmd, devnull=True)
