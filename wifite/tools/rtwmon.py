@@ -406,11 +406,6 @@ class RtwmonAirodump(Dependency):
                     channels = '1-13'
                 backend_cmd.extend(['--channels', str(channels)])
 
-            backend_cmd.extend(['--bw', '20'])
-            backend_cmd.extend(['--dwell-ms', '250'])
-            backend_cmd.extend(['--timeout-ms', '350'])
-            backend_cmd.extend(['--station-scan-ms', '800'])
-
         cmd = Rtwmon._wrap_termux_usb(backend_cmd, device_path=device_path)
         
         # Start process, redirect stderr to file, stdout to PIPE
