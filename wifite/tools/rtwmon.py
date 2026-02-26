@@ -161,6 +161,9 @@ class RtwmonAirodump(Dependency):
         self._burst_size = None
         self._burst_targets = []
         self._burst_last_logged = -1
+        self._attack_pcap_file = None
+        self._pcap_scan_last_time = 0.0
+        self._pcap_scan_last_size = -1
         try:
             for c in (target_clients or []):
                 s = str(c).strip()
@@ -218,6 +221,7 @@ class RtwmonAirodump(Dependency):
             if os.path.exists(pcap_file):
                 try: os.remove(pcap_file)
                 except: pass
+            self._attack_pcap_file = pcap_file
 
             try:
                 burst_interval_ms = int(float(getattr(Configuration, 'wpa_deauth_timeout', 2) or 2) * 1000)
@@ -232,6 +236,8 @@ class RtwmonAirodump(Dependency):
                 burst_size = 10
             if burst_size < 1:
                 burst_size = 1
+            if burst_size < 20:
+                burst_size = 20
             
             backend_cmd = [
                 'python3', '-u', Rtwmon.RTWMON_PATH,
@@ -414,6 +420,52 @@ class RtwmonAirodump(Dependency):
                             continue
                         if all(c.station.lower() != client.station.lower() for c in target.clients):
                             target.clients.append(client)
+            except Exception:
+                pass
+
+            try:
+                pcap_path = str(self._attack_pcap_file or "").strip()
+                if pcap_path and Process.exists("tshark") and os.path.exists(pcap_path):
+                    now = time.monotonic()
+                    if (now - float(self._pcap_scan_last_time)) >= 2.0:
+                        self._pcap_scan_last_time = now
+                        try:
+                            size = int(os.path.getsize(pcap_path))
+                        except Exception:
+                            size = -1
+                        if size != self._pcap_scan_last_size:
+                            self._pcap_scan_last_size = size
+
+                            bssid_norm = str(self.target_bssid).lower()
+                            tshark_filter = f"wlan.bssid=={bssid_norm} && wlan.sa!={bssid_norm} && wlan.da!={bssid_norm}"
+                            cmd = [
+                                "tshark",
+                                "-r",
+                                pcap_path,
+                                "-n",
+                                "-Y",
+                                tshark_filter,
+                                "-T",
+                                "fields",
+                                "-E",
+                                "separator=,",
+                                "-e",
+                                "wlan.sa",
+                                "-e",
+                                "wlan.da",
+                            ]
+                            out, _err = Process(cmd).get_output(timeout=3)
+                            mac_re = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
+                            for line in (out or "").splitlines():
+                                if not line:
+                                    continue
+                                parts = [p.strip().lower() for p in line.split(",") if p.strip()]
+                                for m in parts:
+                                    if not mac_re.fullmatch(m):
+                                        continue
+                                    if m == bssid_key or m == "ff:ff:ff:ff:ff:ff":
+                                        continue
+                                    _remember_client(m, source="pcap")
             except Exception:
                 pass
 
