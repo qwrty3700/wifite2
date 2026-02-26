@@ -17,6 +17,8 @@ from ..config import Configuration
 from ..model.target import Target
 from ..model.client import Client
 
+_RTWMON_RX_CONTROL_SOCKS = {}
+
 class RtwmonIface:
     def __init__(self, driver, vid, pid, bus, addr):
         self.driver = driver
@@ -156,6 +158,7 @@ class RtwmonAirodump(Dependency):
         self._attack_pcap_file = None
         self._pcap_scan_last_time = 0.0
         self._pcap_scan_last_size = -1
+        self._rx_control_sock = None
         try:
             for c in (target_clients or []):
                 s = str(c).strip()
@@ -210,7 +213,7 @@ class RtwmonAirodump(Dependency):
             daemon_sock = "/data/data/com.termux/files/usr/tmp/rtwmon-usb.sock"
 
         if self.target_bssid:
-            # Attack mode: use deauth-burst
+            # Attack mode: use rx + control socket (deauth via rtwmon ctl)
             pcap_file = Configuration.temp(f"{self.output_file_prefix}.cap")
             # Clean old pcap
             if os.path.exists(pcap_file):
@@ -218,36 +221,20 @@ class RtwmonAirodump(Dependency):
                 except: pass
             self._attack_pcap_file = pcap_file
 
+            ctl_sock = Configuration.temp(f"rtwmon_ctl_{info.get('bus')}_{info.get('address')}.sock")
+            self._rx_control_sock = str(ctl_sock)
             try:
-                burst_interval_s = float(getattr(Configuration, 'wpa_deauth_timeout', 2) or 2)
+                _RTWMON_RX_CONTROL_SOCKS[(str(info.get("bus")), str(info.get("address")))] = str(ctl_sock)
             except Exception:
-                burst_interval_s = 2.0
-            if burst_interval_s > 5.0:
-                burst_interval_s = 2.0
-            burst_interval_ms = int(burst_interval_s * 1000)
-            if burst_interval_ms < 200:
-                burst_interval_ms = 200
-            if burst_interval_ms > 2000:
-                burst_interval_ms = 2000
-
-            try:
-                burst_size = int(getattr(Configuration, 'num_deauths', 10) or 10)
-            except Exception:
-                burst_size = 10
-            if burst_size < 1:
-                burst_size = 1
-            if burst_size < 20:
-                burst_size = 20
+                pass
             
             backend_cmd = [
                 'python3', '-u', Rtwmon.RTWMON_PATH,
-                'deauth-burst',
+                'rx',
                 '--channel', str(self.channel or 1),
-                '--bssid', self.target_bssid,
-                '--target-macs', ','.join(['ff:ff:ff:ff:ff:ff'] + list(self.target_clients)),
                 '--pcap', pcap_file,
-                '--burst-size', str(burst_size),
-                '--burst-interval-ms', str(burst_interval_ms),
+                '--timeout-ms', '50',
+                '--control-sock', str(ctl_sock),
             ]
             if daemon_sock and device_path:
                 backend_cmd = [
@@ -260,14 +247,9 @@ class RtwmonAirodump(Dependency):
                     str(daemon_sock),
                     *backend_cmd[3:],
                 ]
-            self._burst_started_at = time.monotonic()
-            self._burst_interval_ms = int(burst_interval_ms)
-            self._burst_size = int(burst_size)
-            self._burst_targets = ['ff:ff:ff:ff:ff:ff'] + list(self.target_clients)
-            self._burst_last_logged = -1
             log_info(
                 'RtwmonAirodump',
-                f'deauth-burst start bssid={self.target_bssid} ch={self.channel or 1} targets={len(self._burst_targets)} size={self._burst_size} interval_ms={self._burst_interval_ms} pcap={pcap_file}',
+                f'rx start bssid={self.target_bssid} ch={self.channel or 1} pcap={pcap_file} control_sock={ctl_sock}',
             )
         else:
             # Scan mode
@@ -374,7 +356,7 @@ class RtwmonAirodump(Dependency):
                 if sta_norm in s:
                     return
                 s.add(sta_norm)
-                log_info('RtwmonAirodump', f'deauth-burst client discovered bssid={self.target_bssid} sta={sta_norm} source={source}')
+                log_info('RtwmonAirodump', f'rx client discovered bssid={self.target_bssid} sta={sta_norm} source={source}')
                 client_fields = [''] * 7
                 client_fields[0] = sta_norm
                 client_fields[3] = '-50'
@@ -386,64 +368,6 @@ class RtwmonAirodump(Dependency):
                     return
                 if all(c.station.lower() != client.station.lower() for c in target.clients):
                     target.clients.append(client)
-
-            try:
-                if self.pid and self.pid.pid and self.pid.pid.stdout:
-                    while True:
-                        line_bytes = self.pid.pid.stdout.readline()
-                        if not line_bytes:
-                            break
-                        try:
-                            line = line_bytes.decode('utf-8', errors='replace').strip()
-                        except Exception:
-                            continue
-                        if not line:
-                            continue
-                        if 'sta=' not in line or 'bssid=' not in line:
-                            continue
-                        log_debug('RtwmonAirodump', f'deauth-burst stdout: {line}')
-                        parts = line.split()
-                        kv = {}
-                        for p in parts:
-                            if '=' not in p:
-                                continue
-                            k, v = p.split('=', 1)
-                            kv[k.strip().lower()] = v.strip()
-                        b = kv.get('bssid', '').lower()
-                        sta = (kv.get('sta') or kv.get('station') or kv.get('client') or '').lower()
-                        if b == bssid_key and sta:
-                            _remember_client(sta, source='stdout')
-            except Exception:
-                pass
-
-            try:
-                if os.path.exists(self.error_file):
-                    with open(self.error_file, 'r', encoding='utf-8', errors='ignore') as f:
-                        f.seek(self._stderr_pos)
-                        chunk = f.read()
-                        self._stderr_pos = f.tell()
-                    for line in chunk.splitlines():
-                        b_m = re.search(r'\bbssid=([0-9A-Fa-f:]{17})\b', line)
-                        if not b_m or b_m.group(1).lower() != self.target_bssid.lower():
-                            continue
-                        sta_m = re.search(r'\bsta=([0-9A-Fa-f:]{17})\b', line)
-                        if not sta_m:
-                            continue
-                        log_debug('RtwmonAirodump', f'deauth-burst stderr: {line}')
-                        _remember_client(sta_m.group(1), source='stderr')
-                        client_fields = [''] * 7
-                        client_fields[0] = sta_m.group(1)
-                        client_fields[3] = '-50'
-                        client_fields[4] = '1'
-                        client_fields[5] = self.target_bssid
-                        try:
-                            client = Client(client_fields)
-                        except Exception:
-                            continue
-                        if all(c.station.lower() != client.station.lower() for c in target.clients):
-                            target.clients.append(client)
-            except Exception:
-                pass
 
             try:
                 pcap_path = str(self._attack_pcap_file or "").strip()
@@ -502,20 +426,6 @@ class RtwmonAirodump(Dependency):
                                         if (int(m.split(":")[0], 16) & 1) != 0:
                                             continue
                                         _remember_client(m, source="pcap")
-            except Exception:
-                pass
-
-            try:
-                if self._burst_started_at is not None and self._burst_interval_ms and self._burst_interval_ms > 0 and self._burst_targets:
-                    interval_s = float(self._burst_interval_ms) / 1000.0
-                    burst_now = int((time.monotonic() - float(self._burst_started_at)) / interval_s)
-                    while self._burst_last_logged < burst_now:
-                        self._burst_last_logged += 1
-                        dest = self._burst_targets[self._burst_last_logged % len(self._burst_targets)]
-                        log_info(
-                            'RtwmonAirodump',
-                            f'deauth-burst burst={self._burst_last_logged} dest={dest} size={int(self._burst_size or 0)} interval_ms={int(self._burst_interval_ms or 0)}',
-                        )
             except Exception:
                 pass
             return [target]
@@ -689,7 +599,7 @@ class RtwmonAireplay(Dependency):
         self.start()
 
     def start(self):
-        # Deauth is handled by RtwmonAirodump (deauth-burst)
+        # Deauth is handled via rtwmon ctl socket while rx runs
         pass
 
     def stop(self):
@@ -725,6 +635,29 @@ class RtwmonAireplay(Dependency):
         num_deauths = int(num_deauths or getattr(Configuration, 'num_deauths', 10) or 10)
         if num_deauths < 20:
             num_deauths = 20
+
+        ctl_sock = None
+        try:
+            ctl_sock = _RTWMON_RX_CONTROL_SOCKS.get((str(info['bus']), str(info['address'])))
+        except Exception:
+            ctl_sock = None
+        if ctl_sock:
+            cmd = [
+                'python3', '-u', Rtwmon.RTWMON_PATH,
+                'ctl',
+                '--sock', str(ctl_sock),
+                'deauth',
+                '--bssid', str(target_bssid),
+                '--target-mac', str(client_mac),
+                '--count', str(num_deauths),
+                '--delay-ms', '50',
+            ]
+            proc = Process(cmd, devnull=True)
+            while proc.poll() is None:
+                if proc.running_time() >= timeout:
+                    proc.interrupt()
+                    break
+            return
 
         cmd = [
             'python3', '-u', Rtwmon.RTWMON_PATH,
