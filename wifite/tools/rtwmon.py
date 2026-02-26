@@ -36,6 +36,39 @@ class Rtwmon(Dependency):
     dependency_url = 'https://github.com/kimocoder/rtwmon' # Placeholder
 
     RTWMON_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'rtwmon', 'rtwmon.py'))
+    TERMUX_USB_RUN_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'rtwmon', 'termux_usb_run.py'))
+
+    @staticmethod
+    def _is_termux() -> bool:
+        if os.environ.get("TERMUX_VERSION") or os.environ.get("TERMUX_APP_PID"):
+            return True
+        prefix = str(os.environ.get("PREFIX", "") or "")
+        if prefix.startswith("/data/data/com.termux/"):
+            return True
+        return os.path.exists("/data/data/com.termux/files/usr/libexec/termux-api")
+
+    @staticmethod
+    def _termux_device_path(bus: str, addr: str) -> Optional[str]:
+        try:
+            b = int(str(bus), 10)
+            a = int(str(addr), 10)
+        except Exception:
+            return None
+        return f"/dev/bus/usb/{b:03d}/{a:03d}"
+
+    @staticmethod
+    def _wrap_termux_usb(cmd: List[str], *, device_path: Optional[str]) -> List[str]:
+        if not Rtwmon._is_termux():
+            return cmd
+        if not os.path.exists(Rtwmon.TERMUX_USB_RUN_PATH):
+            return cmd
+        base = ["python3", "-u", Rtwmon.TERMUX_USB_RUN_PATH]
+        if device_path:
+            base += ["--device", device_path]
+        else:
+            base += ["--auto"]
+        base.append("--")
+        return base + cmd
 
     @staticmethod
     def get_interfaces() -> List[RtwmonIface]:
@@ -156,6 +189,10 @@ class RtwmonAirodump(Dependency):
         if not info:
              raise Exception(f"Invalid rtwmon interface: {self.interface}")
 
+        device_path = None
+        if Rtwmon._is_termux():
+            device_path = Rtwmon._termux_device_path(info.get("bus"), info.get("address"))
+
         if self.target_bssid:
             # Attack mode: use deauth-burst
             pcap_file = Configuration.temp(f"{self.output_file_prefix}.cap")
@@ -178,10 +215,8 @@ class RtwmonAirodump(Dependency):
             if burst_size < 1:
                 burst_size = 1
             
-            cmd = [
+            backend_cmd = [
                 'python3', '-u', Rtwmon.RTWMON_PATH,
-                '--bus', info['bus'],
-                '--address', info['address'],
                 'deauth-burst',
                 '--channel', str(self.channel or 1),
                 '--bssid', self.target_bssid,
@@ -192,17 +227,17 @@ class RtwmonAirodump(Dependency):
             ]
         else:
             # Scan mode
-            cmd = [
+            backend_cmd = [
                 'python3', '-u', Rtwmon.RTWMON_PATH,
-                '--bus', info['bus'],
-                '--address', info['address'],
                 'scan',
             ]
             
             if self.channel:
-                cmd.extend(['--channels', str(self.channel)])
+                backend_cmd.extend(['--channels', str(self.channel)])
             else:
-                cmd.extend(['--channels', '1-13']) # Default
+                backend_cmd.extend(['--channels', '1-13']) # Default
+
+        cmd = Rtwmon._wrap_termux_usb(backend_cmd, device_path=device_path)
         
         # Start process, redirect stderr to file, stdout to PIPE
         self.stderr_file = open(self.error_file, 'w')
