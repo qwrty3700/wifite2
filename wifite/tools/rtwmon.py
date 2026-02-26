@@ -224,11 +224,16 @@ class RtwmonAirodump(Dependency):
             self._attack_pcap_file = pcap_file
 
             try:
-                burst_interval_ms = int(float(getattr(Configuration, 'wpa_deauth_timeout', 2) or 2) * 1000)
+                burst_interval_s = float(getattr(Configuration, 'wpa_deauth_timeout', 2) or 2)
             except Exception:
-                burst_interval_ms = 2000
+                burst_interval_s = 2.0
+            if burst_interval_s > 5.0:
+                burst_interval_s = 2.0
+            burst_interval_ms = int(burst_interval_s * 1000)
             if burst_interval_ms < 200:
                 burst_interval_ms = 200
+            if burst_interval_ms > 2000:
+                burst_interval_ms = 2000
 
             try:
                 burst_size = int(getattr(Configuration, 'num_deauths', 10) or 10)
@@ -437,35 +442,49 @@ class RtwmonAirodump(Dependency):
                             self._pcap_scan_last_size = size
 
                             bssid_norm = str(self.target_bssid).lower()
-                            tshark_filter = f"wlan.bssid=={bssid_norm} && wlan.sa!={bssid_norm} && wlan.da!={bssid_norm}"
-                            cmd = [
+                            cmd_sta_to_ap = [
                                 "tshark",
                                 "-r",
                                 pcap_path,
                                 "-n",
                                 "-Y",
-                                tshark_filter,
+                                f"wlan.fc.type==2 && wlan.fc.to_ds==1 && wlan.fc.from_ds==0 && wlan.da=={bssid_norm}",
                                 "-T",
                                 "fields",
                                 "-E",
                                 "separator=,",
                                 "-e",
                                 "wlan.sa",
+                            ]
+                            out_sta_to_ap, _err1 = Process(cmd_sta_to_ap).get_output(timeout=3)
+
+                            cmd_ap_to_sta = [
+                                "tshark",
+                                "-r",
+                                pcap_path,
+                                "-n",
+                                "-Y",
+                                f"wlan.fc.type==2 && wlan.fc.to_ds==0 && wlan.fc.from_ds==1 && wlan.sa=={bssid_norm}",
+                                "-T",
+                                "fields",
+                                "-E",
+                                "separator=,",
                                 "-e",
                                 "wlan.da",
                             ]
-                            out, _err = Process(cmd).get_output(timeout=3)
+                            out_ap_to_sta, _err2 = Process(cmd_ap_to_sta).get_output(timeout=3)
+
                             mac_re = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
-                            for line in (out or "").splitlines():
-                                if not line:
-                                    continue
-                                parts = [p.strip().lower() for p in line.split(",") if p.strip()]
-                                for m in parts:
-                                    if not mac_re.fullmatch(m):
-                                        continue
-                                    if m == bssid_key or m == "ff:ff:ff:ff:ff:ff":
-                                        continue
-                                    _remember_client(m, source="pcap")
+                            for out in (out_sta_to_ap, out_ap_to_sta):
+                                for line in (out or "").splitlines():
+                                    for m in [p.strip().lower() for p in line.split(",") if p.strip()]:
+                                        if not mac_re.fullmatch(m):
+                                            continue
+                                        if m == bssid_key or m == "ff:ff:ff:ff:ff:ff":
+                                            continue
+                                        if (int(m.split(":")[0], 16) & 1) != 0:
+                                            continue
+                                        _remember_client(m, source="pcap")
             except Exception:
                 pass
 
