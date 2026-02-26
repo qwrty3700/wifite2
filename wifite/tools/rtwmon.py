@@ -62,15 +62,7 @@ class Rtwmon(Dependency):
     def _wrap_termux_usb(cmd: List[str], *, device_path: Optional[str]) -> List[str]:
         if not Rtwmon._is_termux():
             return cmd
-        if not os.path.exists(Rtwmon.TERMUX_USB_RUN_PATH):
-            return cmd
-        base = ["python3", "-u", Rtwmon.TERMUX_USB_RUN_PATH]
-        if device_path:
-            base += ["--device", device_path]
-        else:
-            base += ["--auto"]
-        base.append("--")
-        return base + cmd
+        return cmd
 
     @staticmethod
     def get_interfaces() -> List[RtwmonIface]:
@@ -213,6 +205,9 @@ class RtwmonAirodump(Dependency):
         device_path = None
         if Rtwmon._is_termux():
             device_path = Rtwmon._termux_device_path(info.get("bus"), info.get("address"))
+        daemon_sock = str(os.environ.get("RTWMON_TERMUX_DAEMON_SOCK", "") or "").strip()
+        if not daemon_sock and Rtwmon._is_termux():
+            daemon_sock = "/data/data/com.termux/files/usr/tmp/rtwmon-usb.sock"
 
         if self.target_bssid:
             # Attack mode: use deauth-burst
@@ -254,6 +249,17 @@ class RtwmonAirodump(Dependency):
                 '--burst-size', str(burst_size),
                 '--burst-interval-ms', str(burst_interval_ms),
             ]
+            if daemon_sock and device_path:
+                backend_cmd = [
+                    'python3',
+                    '-u',
+                    Rtwmon.RTWMON_PATH,
+                    '--usb-fd',
+                    str(device_path),
+                    '--termux-daemon-sock',
+                    str(daemon_sock),
+                    *backend_cmd[3:],
+                ]
             self._burst_started_at = time.monotonic()
             self._burst_interval_ms = int(burst_interval_ms)
             self._burst_size = int(burst_size)
@@ -269,6 +275,17 @@ class RtwmonAirodump(Dependency):
                 'python3', '-u', Rtwmon.RTWMON_PATH,
                 'scan',
             ]
+            if daemon_sock and device_path:
+                backend_cmd = [
+                    'python3',
+                    '-u',
+                    Rtwmon.RTWMON_PATH,
+                    '--usb-fd',
+                    str(device_path),
+                    '--termux-daemon-sock',
+                    str(daemon_sock),
+                    *backend_cmd[3:],
+                ]
             
             if self.channel:
                 backend_cmd.extend(['--channels', str(self.channel)])
@@ -720,6 +737,11 @@ class RtwmonAireplay(Dependency):
             '--count', str(num_deauths),
             '--delay-ms', '50',
         ]
+        if Rtwmon._is_termux():
+            daemon_sock = str(os.environ.get("RTWMON_TERMUX_DAEMON_SOCK", "") or "").strip()
+            if not daemon_sock:
+                daemon_sock = "/data/data/com.termux/files/usr/tmp/rtwmon-usb.sock"
+            cmd = ['python3', '-u', Rtwmon.RTWMON_PATH, '--termux-daemon-sock', daemon_sock, *cmd[3:]]
         proc = Process(cmd, devnull=True)
         while proc.poll() is None:
             if proc.running_time() >= timeout:
