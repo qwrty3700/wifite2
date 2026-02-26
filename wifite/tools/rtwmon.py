@@ -9,6 +9,7 @@ import subprocess
 import fcntl
 import socket
 import atexit
+import struct
 from typing import List, Optional
 
 from .dependency import Dependency
@@ -281,6 +282,7 @@ class RtwmonAirodump(Dependency):
         self._attack_pcap_file = None
         self._pcap_scan_last_time = 0.0
         self._pcap_scan_last_size = -1
+        self._pcap_scan_pos = 0
         self._rx_control_sock = None
         try:
             for c in (target_clients or []):
@@ -488,9 +490,9 @@ class RtwmonAirodump(Dependency):
 
             try:
                 pcap_path = str(self._attack_pcap_file or "").strip()
-                if pcap_path and Process.exists("tshark") and os.path.exists(pcap_path):
+                if pcap_path and os.path.exists(pcap_path):
                     now = time.monotonic()
-                    if (now - float(self._pcap_scan_last_time)) >= 2.0:
+                    if (now - float(self._pcap_scan_last_time)) >= 1.0:
                         self._pcap_scan_last_time = now
                         try:
                             size = int(os.path.getsize(pcap_path))
@@ -498,51 +500,114 @@ class RtwmonAirodump(Dependency):
                             size = -1
                         if size != self._pcap_scan_last_size:
                             self._pcap_scan_last_size = size
-
-                            bssid_norm = str(self.target_bssid).lower()
-                            cmd_sta_to_ap = [
-                                "tshark",
-                                "-r",
-                                pcap_path,
-                                "-n",
-                                "-Y",
-                                f"wlan.fc.type==2 && wlan.fc.to_ds==1 && wlan.fc.from_ds==0 && wlan.da=={bssid_norm}",
-                                "-T",
-                                "fields",
-                                "-E",
-                                "separator=,",
-                                "-e",
-                                "wlan.sa",
-                            ]
-                            out_sta_to_ap, _err1 = Process(cmd_sta_to_ap).get_output(timeout=3)
-
-                            cmd_ap_to_sta = [
-                                "tshark",
-                                "-r",
-                                pcap_path,
-                                "-n",
-                                "-Y",
-                                f"wlan.fc.type==2 && wlan.fc.to_ds==0 && wlan.fc.from_ds==1 && wlan.sa=={bssid_norm}",
-                                "-T",
-                                "fields",
-                                "-E",
-                                "separator=,",
-                                "-e",
-                                "wlan.da",
-                            ]
-                            out_ap_to_sta, _err2 = Process(cmd_ap_to_sta).get_output(timeout=3)
-
                             mac_re = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
-                            for out in (out_sta_to_ap, out_ap_to_sta):
-                                for line in (out or "").splitlines():
-                                    for m in [p.strip().lower() for p in line.split(",") if p.strip()]:
-                                        if not mac_re.fullmatch(m):
+
+                            if Process.exists("tshark"):
+                                bssid_norm = str(self.target_bssid).lower()
+                                cmd_sta_to_ap = [
+                                    "tshark",
+                                    "-r",
+                                    pcap_path,
+                                    "-n",
+                                    "-Y",
+                                    f"wlan.fc.type==2 && wlan.fc.to_ds==1 && wlan.fc.from_ds==0 && wlan.da=={bssid_norm}",
+                                    "-T",
+                                    "fields",
+                                    "-E",
+                                    "separator=,",
+                                    "-e",
+                                    "wlan.sa",
+                                ]
+                                out_sta_to_ap, _err1 = Process(cmd_sta_to_ap).get_output(timeout=3)
+
+                                cmd_ap_to_sta = [
+                                    "tshark",
+                                    "-r",
+                                    pcap_path,
+                                    "-n",
+                                    "-Y",
+                                    f"wlan.fc.type==2 && wlan.fc.to_ds==0 && wlan.fc.from_ds==1 && wlan.sa=={bssid_norm}",
+                                    "-T",
+                                    "fields",
+                                    "-E",
+                                    "separator=,",
+                                    "-e",
+                                    "wlan.da",
+                                ]
+                                out_ap_to_sta, _err2 = Process(cmd_ap_to_sta).get_output(timeout=3)
+                                for out in (out_sta_to_ap, out_ap_to_sta):
+                                    for line in (out or "").splitlines():
+                                        for m in [p.strip().lower() for p in line.split(",") if p.strip()]:
+                                            if not mac_re.fullmatch(m):
+                                                continue
+                                            if m == bssid_key or m == "ff:ff:ff:ff:ff:ff":
+                                                continue
+                                            if (int(m.split(":")[0], 16) & 1) != 0:
+                                                continue
+                                            _remember_client(m, source="pcap")
+
+                            bssid_bytes = bytes(int(x, 16) for x in bssid_key.split(":")) if ":" in bssid_key else b""
+                            if len(bssid_bytes) == 6:
+                                with open(pcap_path, "rb") as fp:
+                                    start_pos = int(self._pcap_scan_pos or 0)
+                                    if start_pos < 24:
+                                        start_pos = 0
+                                    fp.seek(0, os.SEEK_END)
+                                    end_pos = int(fp.tell())
+                                    if start_pos > end_pos:
+                                        start_pos = 0
+                                    fp.seek(start_pos, os.SEEK_SET)
+                                    if start_pos == 0:
+                                        gh = fp.read(24)
+                                        if len(gh) != 24:
+                                            self._pcap_scan_pos = 0
+                                            raise RuntimeError("short pcap header")
+                                    pos = fp.tell()
+                                    while True:
+                                        hdr_pos = pos
+                                        ph = fp.read(16)
+                                        if len(ph) != 16:
+                                            break
+                                        incl_len = int(struct.unpack_from("<I", ph, 8)[0])
+                                        if incl_len <= 0 or incl_len > 10_000_000:
+                                            break
+                                        pkt = fp.read(incl_len)
+                                        if len(pkt) != incl_len:
+                                            pos = hdr_pos
+                                            break
+                                        pos = fp.tell()
+                                        if len(pkt) < 8:
                                             continue
-                                        if m == bssid_key or m == "ff:ff:ff:ff:ff:ff":
+                                        rt_len = int(struct.unpack_from("<H", pkt, 2)[0])
+                                        if rt_len <= 0 or rt_len > len(pkt):
                                             continue
-                                        if (int(m.split(":")[0], 16) & 1) != 0:
+                                        frame = pkt[rt_len:]
+                                        if len(frame) < 24:
                                             continue
-                                        _remember_client(m, source="pcap")
+                                        fc = int(struct.unpack_from("<H", frame, 0)[0])
+                                        ftype = (fc >> 2) & 0x3
+                                        if ftype != 2:
+                                            continue
+                                        to_ds = ((fc >> 8) & 1) == 1
+                                        from_ds = ((fc >> 9) & 1) == 1
+                                        a1 = frame[4:10]
+                                        a2 = frame[10:16]
+                                        sta = None
+                                        if to_ds and (not from_ds) and a1 == bssid_bytes:
+                                            sta = a2
+                                        elif (not to_ds) and from_ds and a2 == bssid_bytes:
+                                            sta = a1
+                                        if sta is None or len(sta) != 6:
+                                            continue
+                                        if (sta[0] & 1) != 0:
+                                            continue
+                                        if sta == bssid_bytes:
+                                            continue
+                                        mac = ":".join(f"{b:02x}" for b in sta)
+                                        if not mac_re.fullmatch(mac):
+                                            continue
+                                        _remember_client(mac, source="pcap-py")
+                                    self._pcap_scan_pos = int(pos)
             except Exception:
                 pass
             return [target]
