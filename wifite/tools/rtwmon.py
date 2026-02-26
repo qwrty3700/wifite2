@@ -200,30 +200,41 @@ class RtwmonAirodump(Dependency):
                 try: os.remove(pcap_file)
                 except: pass
             
-            backend_cmd = [
+            backend_scan_cmd = [
                 'python3', '-u', Rtwmon.RTWMON_PATH,
                 'scan',
                 '--channels', str(self.channel or 1),
+            ]
+            backend_rx_cmd = [
+                'python3', '-u', Rtwmon.RTWMON_PATH,
+                'rx',
+                '--channel', str(self.channel or 1),
                 '--pcap', pcap_file,
             ]
         else:
             # Scan mode
-            backend_cmd = [
+            backend_scan_cmd = [
                 'python3', '-u', Rtwmon.RTWMON_PATH,
                 'scan',
             ]
             
             if self.channel:
-                backend_cmd.extend(['--channels', str(self.channel)])
+                backend_scan_cmd.extend(['--channels', str(self.channel)])
             else:
-                backend_cmd.extend(['--channels', '1-13']) # Default
+                backend_scan_cmd.extend(['--channels', '1-13']) # Default
 
-        cmd = Rtwmon._wrap_termux_usb(backend_cmd, device_path=device_path)
+        cmd = Rtwmon._wrap_termux_usb(backend_scan_cmd, device_path=device_path)
         
         # Start process, redirect stderr to file, stdout to PIPE
         self.stderr_file = open(self.error_file, 'w')
         # We use subprocess.PIPE explicitly, although Process wrapper defaults to it if stdout=None
         self.pid = Process(cmd, stdout=subprocess.PIPE, stderr=self.stderr_file)
+        self.capture_pid = None
+        self.capture_stderr = None
+        if self.target_bssid:
+            rx_cmd = Rtwmon._wrap_termux_usb(backend_rx_cmd, device_path=device_path)
+            self.capture_stderr = Process.devnull()
+            self.capture_pid = Process(rx_cmd, stdout=Process.devnull(), stderr=self.capture_stderr)
         
         # Set non-blocking on stdout pipe
         try:
@@ -238,10 +249,20 @@ class RtwmonAirodump(Dependency):
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.pid:
             self.pid.interrupt()
+        if getattr(self, "capture_pid", None):
+            try:
+                self.capture_pid.interrupt()
+            except Exception:
+                pass
         if self.stdout_file:
             self.stdout_file.close()
         if self.stderr_file:
             self.stderr_file.close()
+        if getattr(self, "capture_stderr", None):
+            try:
+                self.capture_stderr.close()
+            except Exception:
+                pass
         
         # Check for errors if process exited
         if os.path.exists(self.error_file) and os.path.getsize(self.error_file) > 0:
