@@ -24,16 +24,17 @@ class AttackWPA(Attack):
         self.clients = []
         self.seed_clients = []
         try:
-            for c in (getattr(target, "clients", None) or []):
-                sta = getattr(c, "station", None) or getattr(c, "client", None) or getattr(c, "mac", None)
-                if not sta:
-                    continue
-                sta = str(sta).strip()
-                if not sta:
-                    continue
-                if sta not in self.seed_clients:
-                    self.seed_clients.append(sta)
-            self.clients = list(self.seed_clients)
+            if not str(Configuration.interface).startswith('rtwmon-'):
+                for c in (getattr(target, "clients", None) or []):
+                    sta = getattr(c, "station", None) or getattr(c, "client", None) or getattr(c, "mac", None)
+                    if not sta:
+                        continue
+                    sta = str(sta).strip()
+                    if not sta:
+                        continue
+                    if sta not in self.seed_clients:
+                        self.seed_clients.append(sta)
+                self.clients = list(self.seed_clients)
         except Exception:
             pass
         self.crack_result = None
