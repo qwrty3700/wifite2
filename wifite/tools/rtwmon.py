@@ -10,6 +10,7 @@ import fcntl
 import socket
 import atexit
 import struct
+import glob
 from typing import List, Optional
 
 from .dependency import Dependency
@@ -116,13 +117,13 @@ def _termux_daemon_reset_once() -> None:
     if _RTWMON_TERMUX_DAEMON_RESET_DONE:
         return
     _RTWMON_TERMUX_DAEMON_RESET_DONE = True
-    sock_path = _termux_daemon_sock()
-    _termux_daemon_close(sock_path)
-    try:
-        if os.path.exists(sock_path):
-            os.unlink(sock_path)
-    except Exception:
-        pass
+    for sock_path in sorted(set(glob.glob("/data/data/com.termux/files/usr/tmp/rtwmon-usb*.sock") + [_termux_daemon_sock()])):
+        _termux_daemon_close(sock_path)
+        try:
+            if os.path.exists(sock_path):
+                os.unlink(sock_path)
+        except Exception:
+            pass
 
 
 def _termux_daemon_close_atexit() -> None:
