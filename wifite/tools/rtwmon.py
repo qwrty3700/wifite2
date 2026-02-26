@@ -391,7 +391,20 @@ class RtwmonAirodump(Dependency):
             if self.channel:
                 backend_cmd.extend(['--channels', str(self.channel)])
             else:
-                backend_cmd.extend(['--channels', '1-13']) # Default
+                channels = '1-13'
+                try:
+                    all_bands = bool(getattr(Configuration, 'all_bands', False))
+                    two_ghz = bool(getattr(Configuration, 'two_ghz', False))
+                    five_ghz = bool(getattr(Configuration, 'five_ghz', False))
+                    if all_bands or (two_ghz and five_ghz):
+                        channels = '1-13,36-165'
+                    elif five_ghz:
+                        channels = '36-165'
+                    elif two_ghz:
+                        channels = '1-13'
+                except Exception:
+                    channels = '1-13'
+                backend_cmd.extend(['--channels', str(channels)])
 
         cmd = Rtwmon._wrap_termux_usb(backend_cmd, device_path=device_path)
         
