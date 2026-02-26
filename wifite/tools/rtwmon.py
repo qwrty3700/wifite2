@@ -208,9 +208,9 @@ class RtwmonAirodump(Dependency):
         device_path = None
         if Rtwmon._is_termux():
             device_path = Rtwmon._termux_device_path(info.get("bus"), info.get("address"))
-        daemon_sock = str(os.environ.get("RTWMON_TERMUX_DAEMON_SOCK", "") or "").strip()
-        if not daemon_sock and Rtwmon._is_termux():
-            daemon_sock = "/data/data/com.termux/files/usr/tmp/rtwmon-usb.sock"
+
+        bus_s = str(info.get("bus"))
+        addr_s = str(info.get("address"))
 
         if self.target_bssid:
             # Attack mode: use rx + control socket (deauth via rtwmon ctl)
@@ -230,23 +230,14 @@ class RtwmonAirodump(Dependency):
             
             backend_cmd = [
                 'python3', '-u', Rtwmon.RTWMON_PATH,
+                '--bus', bus_s,
+                '--address', addr_s,
                 'rx',
                 '--channel', str(self.channel or 1),
                 '--pcap', pcap_file,
                 '--timeout-ms', '50',
                 '--control-sock', str(ctl_sock),
             ]
-            if daemon_sock and device_path:
-                backend_cmd = [
-                    'python3',
-                    '-u',
-                    Rtwmon.RTWMON_PATH,
-                    '--usb-fd',
-                    str(device_path),
-                    '--termux-daemon-sock',
-                    str(daemon_sock),
-                    *backend_cmd[3:],
-                ]
             log_info(
                 'RtwmonAirodump',
                 f'rx start bssid={self.target_bssid} ch={self.channel or 1} pcap={pcap_file} control_sock={ctl_sock}',
@@ -255,19 +246,10 @@ class RtwmonAirodump(Dependency):
             # Scan mode
             backend_cmd = [
                 'python3', '-u', Rtwmon.RTWMON_PATH,
+                '--bus', bus_s,
+                '--address', addr_s,
                 'scan',
             ]
-            if daemon_sock and device_path:
-                backend_cmd = [
-                    'python3',
-                    '-u',
-                    Rtwmon.RTWMON_PATH,
-                    '--usb-fd',
-                    str(device_path),
-                    '--termux-daemon-sock',
-                    str(daemon_sock),
-                    *backend_cmd[3:],
-                ]
             
             if self.channel:
                 backend_cmd.extend(['--channels', str(self.channel)])
