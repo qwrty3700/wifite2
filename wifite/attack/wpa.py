@@ -426,11 +426,15 @@ class AttackWPA(Attack):
         handshake = None
         
         # Start Airodump on capture interface
+        airodump_kwargs = {}
+        if str(Configuration.interface).startswith('rtwmon-'):
+            airodump_kwargs['target_clients'] = list(self.seed_clients)
         with Airodump(channel=self.target.channel,
                       target_bssid=self.target.bssid,
                       skip_wps=True,
                       output_file_prefix='wpa',
-                      interface=self.capture_interface) as airodump:
+                      interface=self.capture_interface,
+                      **airodump_kwargs) as airodump:
             
             Color.clear_entire_line()
             Color.pattack('WPA', self.target, 'Handshake capture', 'Waiting for target to appear...')
@@ -1183,10 +1187,14 @@ class AttackWPA(Attack):
         handshake = None
 
         # First, start Airodump process
+        airodump_kwargs = {}
+        if str(Configuration.interface).startswith('rtwmon-'):
+            airodump_kwargs['target_clients'] = list(self.seed_clients)
         with Airodump(channel=self.target.channel,
                       target_bssid=self.target.bssid,
                       skip_wps=True,
-                      output_file_prefix='wpa') as airodump:
+                      output_file_prefix='wpa',
+                      **airodump_kwargs) as airodump:
 
             Color.clear_entire_line()
             Color.pattack('WPA', self.target, 'Handshake capture', 'Waiting for target to appear...')

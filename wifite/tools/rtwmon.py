@@ -131,6 +131,7 @@ class RtwmonAirodump(Dependency):
 
     def __init__(self, interface=None, channel=None, encryption=None,
                  wps=None, target_bssid=None,
+                 target_clients=None,
                  output_file_prefix='rtwmon_scan',
                  ivs_only=False, skip_wps=False, delete_existing_files=True):
         if interface is None:
@@ -152,6 +153,16 @@ class RtwmonAirodump(Dependency):
         self._attack_clients = {}
         self._stderr_pos = 0
         self._station_scan_bssid = None
+        self.target_clients = []
+        try:
+            for c in (target_clients or []):
+                s = str(c).strip()
+                if not s:
+                    continue
+                if s not in self.target_clients:
+                    self.target_clients.append(s)
+        except Exception:
+            self.target_clients = []
 
     def find_files(self, endswith=None):
         result = []
@@ -220,7 +231,7 @@ class RtwmonAirodump(Dependency):
                 'deauth-burst',
                 '--channel', str(self.channel or 1),
                 '--bssid', self.target_bssid,
-                '--target-mac', 'ff:ff:ff:ff:ff:ff',
+                '--target-macs', ','.join(['ff:ff:ff:ff:ff:ff'] + list(self.target_clients)),
                 '--pcap', pcap_file,
                 '--burst-size', str(burst_size),
                 '--burst-interval-ms', str(burst_interval_ms),
