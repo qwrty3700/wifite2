@@ -758,6 +758,11 @@ class RtwmonAireplay(Dependency):
             ctl_sock = _RTWMON_RX_CONTROL_SOCKS.get((str(info['bus']), str(info['address'])))
         except Exception:
             ctl_sock = None
+        if not ctl_sock:
+            try:
+                ctl_sock = Configuration.temp(f"rtwmon_ctl_{info.get('bus')}_{info.get('address')}.sock")
+            except Exception:
+                ctl_sock = None
         if ctl_sock:
             cmd = [
                 'python3', '-u', Rtwmon.RTWMON_PATH,
@@ -771,25 +776,4 @@ class RtwmonAireplay(Dependency):
             ]
             Process(cmd, devnull=True)
             return
-
-        cmd = [
-            'python3', '-u', Rtwmon.RTWMON_PATH,
-            '--bus', str(info['bus']),
-            '--address', str(info['address']),
-            'deauth',
-            '--channel', str(int(channel)),
-            '--bssid', str(target_bssid),
-            '--target-mac', str(client_mac),
-            '--count', str(num_deauths),
-            '--delay-ms', '50',
-        ]
-        if Rtwmon._is_termux():
-            daemon_sock = None
-            try:
-                daemon_sock = _RTWMON_DAEMON_SOCKS.get((str(info['bus']), str(info['address'])))
-            except Exception:
-                daemon_sock = None
-            if not daemon_sock:
-                daemon_sock = "/data/data/com.termux/files/usr/tmp/rtwmon-usb.sock"
-            cmd = ['python3', '-u', Rtwmon.RTWMON_PATH, '--termux-daemon-sock', daemon_sock, *cmd[3:]]
-        Process(cmd, devnull=True)
+        return
