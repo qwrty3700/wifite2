@@ -766,14 +766,30 @@ class RtwmonAireplay(Dependency):
         if ctl_sock:
             cmd = [
                 'python3', '-u', Rtwmon.RTWMON_PATH,
-                'ctl',
-                '--sock', str(ctl_sock),
                 'deauth',
+                '--sock', str(ctl_sock),
+                '--channel', str(int(channel)),
                 '--bssid', str(target_bssid),
                 '--target-mac', str(client_mac),
                 '--count', str(num_deauths),
                 '--delay-ms', '50',
             ]
-            Process(cmd, devnull=True)
+
+            def _run_when_ready():
+                t0 = time.monotonic()
+                while (time.monotonic() - t0) < float(timeout or 2):
+                    if os.path.exists(str(ctl_sock)):
+                        Process(cmd, devnull=True)
+                        return
+                    time.sleep(0.05)
+                if os.path.exists(str(ctl_sock)):
+                    Process(cmd, devnull=True)
+
+            try:
+                import threading
+
+                threading.Thread(target=_run_when_ready, daemon=True).start()
+            except Exception:
+                Process(cmd, devnull=True)
             return
         return
