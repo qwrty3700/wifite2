@@ -706,6 +706,8 @@ class RtwmonAireplay(Dependency):
 
         client_mac = client_mac or 'ff:ff:ff:ff:ff:ff'
         num_deauths = int(num_deauths or getattr(Configuration, 'num_deauths', 10) or 10)
+        if num_deauths < 20:
+            num_deauths = 20
 
         cmd = [
             'python3', '-u', Rtwmon.RTWMON_PATH,
