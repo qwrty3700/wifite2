@@ -22,6 +22,7 @@ class AttackWPA(Attack):
     def __init__(self, target):
         super(AttackWPA, self).__init__(target)
         self.clients = []
+        self.seed_clients = []
         try:
             for c in (getattr(target, "clients", None) or []):
                 sta = getattr(c, "station", None) or getattr(c, "client", None) or getattr(c, "mac", None)
@@ -30,8 +31,9 @@ class AttackWPA(Attack):
                 sta = str(sta).strip()
                 if not sta:
                     continue
-                if sta not in self.clients:
-                    self.clients.append(sta)
+                if sta not in self.seed_clients:
+                    self.seed_clients.append(sta)
+            self.clients = list(self.seed_clients)
         except Exception:
             pass
         self.crack_result = None
@@ -439,7 +441,7 @@ class AttackWPA(Attack):
                 Color.pl('\n{!} {R}Target timeout:{W} %s' % str(e))
                 return None
             
-            self.clients = []
+            self.clients = list(self.seed_clients)
             
             # Try to load existing handshake
             if not Configuration.ignore_old_handshakes:
@@ -839,7 +841,7 @@ class AttackWPA(Attack):
             timeout_timer = Timer(Configuration.wpa_attack_timeout)
             deauth_timer = Timer(Configuration.wpa_deauth_timeout)
             
-            self.clients = []
+            self.clients = list(self.seed_clients)
             
             while handshake is None and not timeout_timer.ended():
                 step_timer = Timer(1)
@@ -1194,7 +1196,7 @@ class AttackWPA(Attack):
                 Color.pl('\n{!} {R}Target timeout:{W} %s' % str(e))
                 return None
 
-            self.clients = []
+            self.clients = list(self.seed_clients)
 
             # Try to load existing handshake
             if not Configuration.ignore_old_handshakes:
