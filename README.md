@@ -59,7 +59,7 @@ Supported Operating Systems
 ### Mobile Support 📱
 * **Termux - rootless
 * **Nethunter - root
-* **Requires wireless adapter compatible with rtwmon
+* **Requires wireless adapter compatible with rtwmon, termux-api for rootless
     
 
 ### Partially Supported ⚠️
