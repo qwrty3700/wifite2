@@ -57,9 +57,9 @@ Supported Operating Systems
 * **[BlackArch](https://blackarch.org/)** - Compatible with latest tool versions
 
 ### Mobile Support 📱
-* * Termux - rootless
-  * Nethunter - root
-  * Requires wireless adapter compatible with rtwmon
+* **Termux - rootless
+* **Nethunter - root
+* **Requires wireless adapter compatible with rtwmon
     
 
 ### Partially Supported ⚠️
