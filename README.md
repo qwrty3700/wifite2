@@ -57,10 +57,10 @@ Supported Operating Systems
 * **[BlackArch](https://blackarch.org/)** - Compatible with latest tool versions
 
 ### Mobile Support 📱
-* **Kali NetHunter (Android)** - Requires custom kernel with monitor mode support
-  * Tested on Android 10 to latest 16
-  * Requires compatible wireless adapter and proper drivers
-  * See [NetHunter Documentation](https://www.kali.org/docs/nethunter/) for setup
+* * Termux - rootless
+  * Nethunter - root
+  * Requires wireless adapter compatible with rtwmon
+    
 
 ### Partially Supported ⚠️
 * **Ubuntu/Debian** - May work with manual tool installation and updated drivers
@@ -128,14 +128,11 @@ For most users on Kali Linux or similar distributions:
 
 ```bash
 # Clone the repository
-git clone https://github.com/kimocoder/wifite2.git
+git clone https://github.com/qwrty3700/wifite2.git --recursive
 cd wifite2
 
-# Install system-wide
-sudo python3 setup.py install
-
 # Run wifite
-sudo wifite
+python3 wifite
 ```
 
 ### Development Install with Poetry (Recommended for Developers)
@@ -183,27 +180,6 @@ pip3 install -r requirements.txt
 sudo python3 wifite.py
 ```
 
-### Package Manager Install
-
-On some distributions, wifite2 may be available through package managers:
-
-```bash
-# Kali Linux / Debian
-sudo apt update && sudo apt install wifite
-
-# Arch Linux (AUR)
-yay -S wifite2-git
-```
-
-### Verify Installation
-
-After installation, verify all dependencies are available:
-
-```bash
-sudo wifite --help
-```
-
-This will show if any required tools are missing.
 
 
 
